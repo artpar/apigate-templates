@@ -16,3 +16,6 @@ Thumbs.db
 *.db-shm
 *.db-wal
 *.db-journal
+
+# Backup files
+*.db.bak
