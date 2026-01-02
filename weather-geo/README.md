@@ -1,74 +1,195 @@
 # Weather & Geo API Gateway
 
-Monetize weather and location APIs through a unified gateway. This deployment is configured for platforms that provide weather forecasts, geocoding, and location-based services.
+Monetize location services through a unified gateway with **geography-based pricing**.
 
-## Business Use Case
+## Unique Features Demonstrated
 
-You're building a location-aware application that needs weather data, geocoding, and IP geolocation. Customers pay you for a unified API that handles multiple provider integrations.
+| Feature | Implementation |
+|---------|---------------|
+| **Protocol** | HTTP buffered |
+| **Metering** | Batch counting (response field extraction) |
+| **Upstream Auth** | Query parameter injection |
+| **Path Matching** | Mixed (exact + prefix) |
+| **Payment** | Stripe integration |
 
-## Upstreams (Service Providers)
+## How Query Param Auth Works
 
-| Provider | Base URL | Auth Type | Use Case |
-|----------|----------|-----------|----------|
-| OpenWeatherMap | api.openweathermap.org | Query param (appid) | Weather forecasts |
-| MapBox | api.mapbox.com | Query param (access_token) | Geocoding, maps |
-| IPInfo | ipinfo.io | Bearer token | IP geolocation |
+Unlike header-based authentication, this gateway injects API keys as query parameters:
 
-## Routes
+```javascript
+// Request transform injects auth before forwarding
+SetQuery: {"appid": env("OPENWEATHER_KEY"), "units": "metric"}
 
-| Route | Upstream | Description |
-|-------|----------|-------------|
-| `/v1/weather/*` | openweather | Weather data access |
-| `/v1/geo/*` | mapbox | Geocoding and maps |
-| `/v1/ip/*` | ipinfo | IP geolocation |
+// Input:  /weather/current?q=London
+// Output: /data/2.5/weather?q=London&appid=xxx&units=metric
+```
 
-## Plans & Pricing
+This enables **seamless integration with Google-style APIs**.
 
-| Plan | Rate Limit | Monthly Calls | Price | Target Customer |
-|------|------------|---------------|-------|-----------------|
-| Free | 10 req/min | 500 calls | $0 | Testing |
-| Hobby | 30 req/min | 5K calls | $19/mo | Side projects |
-| Pro | 120 req/min | 50K calls | $49/mo | Apps in production |
-| Business | 600 req/min | 500K calls | $199/mo | High-traffic apps |
+## Configuration
 
-## Users (Demo)
+### Upstreams
 
-| Email | Role | Plan | Description |
-|-------|------|------|-------------|
-| admin@weathergeo.io | Admin | - | Platform administrator |
-| hobbyist@gmail.com | User | Hobby | Weekend developer |
-| dev@mobileapp.co | User | Pro | Mobile app developer |
-| api@logistics.com | User | Business | Logistics company |
+| Provider | URL | Auth Type | Notes |
+|----------|-----|-----------|-------|
+| OpenWeatherMap | api.openweathermap.org | Query (appid) | Weather data |
+| MapBox | api.mapbox.com | Query (access_token) | Geocoding |
+| IPInfo | ipinfo.io | Query (token) | IP geolocation |
+
+### Routes
+
+| Path | Match | Rate Limit | Metering |
+|------|-------|------------|----------|
+| `/weather/current` | Exact | 60/min | `1` |
+| `/weather/forecast` | Exact | 30/min | Forecast count |
+| `/geocode/*` | Prefix | 10/min | Feature count |
+| `/ip/*` | Prefix | 120/min | `1` |
+| `/maps/*` | Prefix | 5/min | `5` (heavy) |
+
+### Plans
+
+| Plan | Price | Quota | Rate Limit | Coverage |
+|------|-------|-------|------------|----------|
+| Local | $0 | 1,000/mo | 60 req/min | 1 city |
+| Regional | $19 | 10,000/mo | 120 req/min | 1 country |
+| National | $49 | 50,000/mo | 300 req/min | 10 countries |
+| Global | $149 | Unlimited | 600 req/min | Worldwide |
 
 ## Quick Start
 
+### 1. Set Environment Variables
+
 ```bash
-# Set your API keys
-export OPENWEATHERMAP_API_KEY="your-key"
-export MAPBOX_ACCESS_TOKEN="your-token"
+export OPENWEATHER_KEY="your-api-key"
+export MAPBOX_TOKEN="your-access-token"
 export IPINFO_TOKEN="your-token"
-
-# Start the gateway
-./start.sh
-
-# Access admin UI
-open http://localhost:8080
 ```
 
-## Test the API
+### 2. Start the Gateway
 
 ```bash
-# Get your API key from the admin UI, then:
-curl "http://localhost:8080/v1/weather/data/2.5/weather?q=London" \
-  -H "X-API-Key: YOUR_API_KEY"
+./start.sh
+```
 
-curl "http://localhost:8080/v1/ip/8.8.8.8" \
+### 3. Access Admin Portal
+
+```
+http://localhost:8080/portal
+
+Default credentials:
+Email: admin@weathergeo.io
+Password: GeoAdmin123!
+```
+
+### 4. Get an API Key
+
+1. Log in to the portal
+2. Navigate to API Keys
+3. Create a new key
+4. Copy the key for testing
+
+## API Usage
+
+### Current Weather
+
+```bash
+# Get current weather (exact path match)
+curl "http://localhost:8080/weather/current?q=London" \
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
-## Metering
+### Weather Forecast
 
-Call-based metering (each API call counts as 1):
-- Weather queries count as 1 call
-- Geocoding lookups count as 1 call
-- IP lookups count as 1 call
+```bash
+# Get 5-day forecast (bills by forecast count)
+curl "http://localhost:8080/weather/forecast?q=London" \
+  -H "X-API-Key: YOUR_API_KEY"
+```
+
+### Geocoding
+
+```bash
+# Forward geocoding (prefix match, bills by feature count)
+curl "http://localhost:8080/geocode/forward?q=New+York" \
+  -H "X-API-Key: YOUR_API_KEY"
+```
+
+### IP Geolocation
+
+```bash
+# IP lookup (fast endpoint, 120 req/min)
+curl "http://localhost:8080/ip/8.8.8.8" \
+  -H "X-API-Key: YOUR_API_KEY"
+```
+
+### Maps (Heavy Endpoint)
+
+```bash
+# Map tiles (rate limited to 5/min, bills 5 units per call)
+curl "http://localhost:8080/maps/static/v1/mapbox.streets/0/0/0.png" \
+  -H "X-API-Key: YOUR_API_KEY"
+```
+
+## Stripe Integration
+
+This deployment uses Stripe for payment processing:
+
+| Plan | Stripe Price ID |
+|------|-----------------|
+| Local | (no payment) |
+| Regional | `price_regional_weathergeo` |
+| National | `price_national_weathergeo` |
+| Global | `price_global_weathergeo` |
+
+Configure your Stripe webhook to point to `/webhook/stripe`.
+
+## Technical Details
+
+### Per-Endpoint Rate Limiting
+
+Different endpoints have different rate limits:
+
+| Endpoint | Rate Limit | Reason |
+|----------|------------|--------|
+| `/weather/current` | 60/min | Light query |
+| `/weather/forecast` | 30/min | Heavier computation |
+| `/geocode/*` | 10/min | API quota protection |
+| `/ip/*` | 120/min | Very fast lookups |
+| `/maps/*` | 5/min | Bandwidth intensive |
+
+### Batch Metering
+
+Forecast and geocode endpoints bill by results returned:
+
+```javascript
+// Forecast: bill by number of forecast periods
+json(respBody).list ? len(json(respBody).list) : 1
+
+// Geocoding: bill by number of features
+json(respBody).features ? len(json(respBody).features) : 1
+```
+
+### Request Transform
+
+API keys and defaults are injected:
+
+```
+SetQuery: {"appid": env("OPENWEATHER_KEY"), "units": "metric"}
+```
+
+### Response Transform
+
+Cache headers are added:
+
+```
+SetHeaders: {"X-Cache-TTL": "300", "X-Data-Source": "aggregated"}
+```
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `apigate.db` | Pre-configured SQLite database |
+| `start.sh` | Startup script |
+| `test.sh` | Feature verification tests |
+| `README.md` | This documentation |

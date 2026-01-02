@@ -1,74 +1,195 @@
 # Content & Media API Gateway
 
-Monetize content and media APIs through a unified gateway. This deployment is configured for platforms that aggregate images, videos, and news content.
+Monetize media APIs through a unified gateway with **bandwidth-based billing**.
 
-## Business Use Case
+## Unique Features Demonstrated
 
-You're building a content aggregation platform that needs stock photos, video hosting, and news feeds. Customers pay you for a unified API that handles multiple provider integrations.
+| Feature | Implementation |
+|---------|---------------|
+| **Protocol** | HTTP streaming (chunked transfer) |
+| **Metering** | Response bytes (KB-based billing) |
+| **Upstream Auth** | Header-based |
+| **Path Matching** | Prefix matching |
+| **Payment** | Free-tier focused |
 
-## Upstreams (Service Providers)
+## How Bandwidth Billing Works
 
-| Provider | Base URL | Auth Type | Use Case |
-|----------|----------|-----------|----------|
-| Unsplash | api.unsplash.com | Header (Authorization) | Stock photos |
-| Pexels | api.pexels.com | Header (Authorization) | Stock photos/videos |
-| NewsAPI | newsapi.org | Query param (apiKey) | News articles |
+Unlike request-based billing, this gateway meters actual bytes transferred:
 
-## Routes
+```javascript
+// Metering expression: KB transferred
+responseBytes / 1024
 
-| Route | Upstream | Description |
-|-------|----------|-------------|
-| `/v1/photos/*` | unsplash | Stock photo search |
-| `/v1/media/*` | pexels | Photos and videos |
-| `/v1/news/*` | newsapi | News articles |
+// Example: 5MB image = 5,120 KB billed
+```
 
-## Plans & Pricing
+This enables **fair billing for media-heavy APIs** where file sizes vary significantly.
 
-| Plan | Rate Limit | Monthly Calls | Price | Target Customer |
-|------|------------|---------------|-------|-----------------|
-| Free | 10 req/min | 500 calls | $0 | Testing |
-| Creator | 30 req/min | 10K calls | $29/mo | Content creators |
-| Agency | 120 req/min | 100K calls | $79/mo | Marketing agencies |
-| Enterprise | 600 req/min | 1M calls | $299/mo | Media companies |
+## Configuration
 
-## Users (Demo)
+### Upstreams
 
-| Email | Role | Plan | Description |
-|-------|------|------|-------------|
-| admin@contentapi.io | Admin | - | Platform administrator |
-| blogger@gmail.com | User | Creator | Independent blogger |
-| team@agency.co | User | Agency | Marketing agency |
-| media@publisher.com | User | Enterprise | News publisher |
+| Provider | URL | Auth Type | Auth Value |
+|----------|-----|-----------|------------|
+| Unsplash | api.unsplash.com | Header (Authorization) | `Client-ID ${UNSPLASH_KEY}` |
+| Pexels | api.pexels.com | Header (Authorization) | `${PEXELS_KEY}` |
+| NewsAPI | newsapi.org | Query (apiKey) | `${NEWSAPI_KEY}` |
+
+### Routes
+
+| Path | Protocol | Metering | Description |
+|------|----------|----------|-------------|
+| `/photos/*` | HTTP Stream | `responseBytes / 1024` | Stock photos |
+| `/videos/*` | HTTP Stream | `responseBytes / 1024` | Video content |
+| `/news/*` | HTTP | Article count | News articles |
+
+### Plans
+
+| Plan | Price | Bandwidth | Rate Limit | Quality |
+|------|-------|-----------|------------|---------|
+| Free | $0 | 100 MB/mo | 60 req/min | Low-res (640px) |
+| Creator | $29 | 5 GB/mo | 120 req/min | HD (1920px) |
+| Agency | $79 | 50 GB/mo | 300 req/min | 4K (4096px) |
+| Enterprise | $299 | Unlimited | 600 req/min | RAW + API |
 
 ## Quick Start
 
+### 1. Set Environment Variables
+
 ```bash
-# Set your API keys
-export UNSPLASH_ACCESS_KEY="your-access-key"
-export PEXELS_API_KEY="your-api-key"
+export UNSPLASH_KEY="your-access-key"
+export PEXELS_KEY="your-api-key"
 export NEWSAPI_KEY="your-api-key"
-
-# Start the gateway
-./start.sh
-
-# Access admin UI
-open http://localhost:8080
 ```
 
-## Test the API
+### 2. Start the Gateway
 
 ```bash
-# Get your API key from the admin UI, then:
-curl "http://localhost:8080/v1/photos/search?query=nature" \
-  -H "X-API-Key: YOUR_API_KEY"
+./start.sh
+```
 
-curl "http://localhost:8080/v1/news/top-headlines?country=us" \
+### 3. Access Admin Portal
+
+```
+http://localhost:8080/portal
+
+Default credentials:
+Email: admin@contentmedia.io
+Password: ContentAdmin123!
+```
+
+### 4. Get an API Key
+
+1. Log in to the portal
+2. Navigate to API Keys
+3. Create a new key
+4. Copy the key for testing
+
+## API Usage
+
+### Photo Search
+
+```bash
+# Search photos (bills by KB transferred)
+curl "http://localhost:8080/photos/search/photos?query=nature" \
   -H "X-API-Key: YOUR_API_KEY"
 ```
 
-## Metering
+### Get Photo
 
-Call-based metering (each API call counts as 1):
-- Photo searches count as 1 call
-- Media lookups count as 1 call
-- News queries count as 1 call
+```bash
+# Get specific photo (bills by KB transferred)
+curl "http://localhost:8080/photos/photos/abc123" \
+  -H "X-API-Key: YOUR_API_KEY"
+```
+
+### Video Search
+
+```bash
+# Search videos (streaming, bills by KB)
+curl "http://localhost:8080/videos/videos/search?query=ocean" \
+  -H "X-API-Key: YOUR_API_KEY"
+```
+
+### News Headlines
+
+```bash
+# Get news (bills by article count)
+curl "http://localhost:8080/news/v2/top-headlines?country=us" \
+  -H "X-API-Key: YOUR_API_KEY"
+```
+
+## Free-Tier Focus
+
+This deployment emphasizes generous free tiers for content creators:
+
+| Feature | Free Plan |
+|---------|-----------|
+| Bandwidth | 100 MB/month |
+| Rate Limit | 60 req/min |
+| Quality | 640px max width |
+| API Access | Full (with limits) |
+
+Upgrade to paid plans for higher quality and bandwidth.
+
+## Technical Details
+
+### HTTP Streaming Protocol
+
+The gateway uses chunked transfer encoding for efficient media delivery:
+
+```
+Transfer-Encoding: chunked
+Content-Type: application/octet-stream
+```
+
+This allows **real-time streaming without buffering** the entire response.
+
+### Byte-Based Metering
+
+Every response is measured in bytes:
+
+```javascript
+// Expression: responseBytes / 1024
+// Converts bytes to KB for billing
+
+// 1 MB image = 1024 KB billed
+// 100 KB thumbnail = 100 KB billed
+```
+
+### Response Transform
+
+Privacy headers are stripped:
+
+```
+DeleteHeaders: ["X-Tracking-ID", "X-Analytics-ID"]
+```
+
+### Plan-Based Quality (Optional)
+
+Request transforms can adjust quality based on plan:
+
+```javascript
+SetQuery: {
+  "w": planID == "free" ? "640" : (planID == "creator" ? "1920" : "4096"),
+  "q": planID == "free" ? "60" : "100"
+}
+```
+
+## Bandwidth Quota Examples
+
+| Action | Data Size | Free Plan Impact |
+|--------|-----------|------------------|
+| Photo search (10 results) | ~50 KB | 0.05% of quota |
+| Single HD photo | ~500 KB | 0.5% of quota |
+| 4K photo download | ~5 MB | 5% of quota |
+| Video preview | ~20 MB | 20% of quota |
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `apigate.db` | Pre-configured SQLite database |
+| `start.sh` | Startup script |
+| `test.sh` | Feature verification tests |
+| `README.md` | This documentation |
